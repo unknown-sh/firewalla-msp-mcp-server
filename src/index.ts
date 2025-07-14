@@ -588,34 +588,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
 
-      // Search API
+      // Search API - Based on comprehensive API testing
       {
         name: "search_global",
-        description: "Perform global search across all entities (devices, alarms, rules, flows)",
+        description: "Search across searchable entity types (devices, alarms, flows, boxes) using Firewalla query syntax",
         inputSchema: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "Search query string",
+              description: "Search query using Firewalla syntax. Supports: text search, key:value pairs, wildcards (*), quotes, exclusions (-), numeric comparisons (><=), ranges (start-end), units (KB/MB/GB). Examples: 'iPhone', 'status:active', 'device.name:*iphone*', 'ts:>1720000000', 'download:>1MB'",
             },
             types: {
               type: "array",
               items: {
                 type: "string",
-                enum: ["devices", "alarms", "rules", "flows", "boxes"],
+                enum: ["devices", "alarms", "flows", "boxes"],
               },
-              description: "Entity types to search in (optional, searches all if not specified)",
+              description: "Entity types to search (default: all searchable types). Note: target-lists, stats, trends do not support search",
             },
             limit: {
               type: "number",
-              description: "Maximum number of results per entity type (default: 10, max: 100)",
+              description: "Maximum results per type (default: 10, max: 500)",
               minimum: 1,
-              maximum: 100,
+              maximum: 500,
             },
-            group: {
+            cursor: {
               type: "string",
-              description: "Filter by specific box group ID (optional)",
+              description: "Pagination cursor for continuing search results",
             },
           },
           required: ["query"],
@@ -623,27 +623,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "search_devices",
-        description: "Search for devices by name, MAC address, or IP",
+        description: "Search devices using Firewalla query syntax with device-specific qualifiers",
         inputSchema: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "Search query (device name, MAC, IP, etc.)",
-            },
-            box: {
-              type: "string",
-              description: "Filter by specific box ID (optional)",
-            },
-            group: {
-              type: "string",
-              description: "Filter by specific box group ID (optional)",
+              description: "Search query with device qualifiers: device.name, device.id, box.id, box.name, box.group.id. Supports text search, wildcards, quotes. Examples: 'iPhone', 'device.name:*iphone*', 'box.id:uuid'",
             },
             limit: {
               type: "number",
-              description: "Maximum number of results (default: 50, max: 200)",
+              description: "Maximum results (default: 50, max: 500)",
               minimum: 1,
-              maximum: 200,
+              maximum: 500,
+            },
+            cursor: {
+              type: "string",
+              description: "Pagination cursor from previous response",
             },
           },
           required: ["query"],
@@ -651,28 +647,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "search_alarms",
-        description: "Search for alarms by type, message, or properties",
+        description: "Search alarms using Firewalla query syntax with alarm-specific qualifiers",
         inputSchema: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "Search query (alarm message, type, etc.)",
-            },
-            status: {
-              type: "string",
-              enum: ["active", "resolved", "all"],
-              description: "Filter by alarm status (default: all)",
-            },
-            type: {
-              type: "string",
-              description: "Filter by specific alarm type",
+              description: "Search query with alarm qualifiers: ts, type, status, box.id, box.name, box.group.id, device.id, device.name, remote.category, remote.domain, remote.region, transfer.download, transfer.upload, transfer.total. Supports ranges, comparisons, units. Examples: 'status:active', 'type:1', 'ts:>1720000000', 'transfer.total:>1MB'",
             },
             limit: {
               type: "number",
-              description: "Maximum number of results (default: 50, max: 200)",
+              description: "Maximum results (default: 50, max: 500)",
               minimum: 1,
-              maximum: 200,
+              maximum: 500,
+            },
+            cursor: {
+              type: "string",
+              description: "Pagination cursor from previous response",
             },
           },
           required: ["query"],
@@ -680,29 +671,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "search_flows",
-        description: "Search for network flows by destination, port, or protocol",
+        description: "Search network flows using Firewalla query syntax with flow-specific qualifiers",
         inputSchema: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "Search query (destination, port, protocol, etc.)",
-            },
-            protocol: {
-              type: "string",
-              enum: ["tcp", "udp", "icmp", "any"],
-              description: "Filter by protocol type (optional)",
-            },
-            direction: {
-              type: "string",
-              enum: ["inbound", "outbound", "bidirection"],
-              description: "Filter by flow direction (optional)",
+              description: "Search query with flow qualifiers: ts, status, direction, box.id, box.name, box.group.id, device.id, device.name, category, domain, region, sport, dport, download, upload, total. Supports wildcards, ranges, comparisons, units. Examples: 'direction:outbound', 'domain:*google*', 'download:>1MB', 'ts:>1720000000'",
             },
             limit: {
               type: "number",
-              description: "Maximum number of results (default: 50, max: 200)",
+              description: "Maximum results (default: 50, max: 500)",
               minimum: 1,
-              maximum: 200,
+              maximum: 500,
+            },
+            cursor: {
+              type: "string",
+              description: "Pagination cursor from previous response",
             },
           },
           required: ["query"],
@@ -935,7 +920,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // Search API
       case "search_global": {
-        const searchTypes: string[] = (args.types as string[]) || ["devices", "alarms", "rules", "flows", "boxes"];
+        const searchTypes: string[] = (args.types as string[]) || ["devices", "alarms", "flows", "boxes"];
         const limit = args.limit || 10;
         const results: any = {
           query: args.query,
@@ -943,14 +928,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           total_count: 0
         };
 
-        // Search across all specified entity types
+        // Search across all specified entity types (only searchable ones)
         for (const entityType of searchTypes) {
           try {
             const params: any = {
               query: args.query,
               limit: limit
             };
-            if (args.group) params.group = args.group;
+            if (args.cursor) params.cursor = args.cursor;
 
             let endpoint = "";
             switch (entityType) {
@@ -959,9 +944,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
               case "alarms":
                 endpoint = "/alarms";
-                break;
-              case "rules":
-                endpoint = "/rules";
                 break;
               case "flows":
                 endpoint = "/flows";
@@ -974,12 +956,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             const response = await httpClient.get(endpoint, { params });
-            const data = Array.isArray(response.data) 
-              ? { count: response.data.length, results: response.data }
-              : response.data;
+            const data = response.data;
             
-            results.results[entityType] = data.results || data;
-            results.total_count += (data.count || (Array.isArray(data.results) ? data.results.length : 0));
+            // Handle API response format properly
+            if (data.results) {
+              results.results[entityType] = {
+                results: data.results,
+                count: data.count || data.results.length,
+                next_cursor: data.next_cursor
+              };
+            } else if (Array.isArray(data)) {
+              results.results[entityType] = {
+                results: data,
+                count: data.length
+              };
+            } else {
+              results.results[entityType] = {
+                results: [data],
+                count: 1
+              };
+            }
+            
+            results.total_count += results.results[entityType].count;
           } catch (error) {
             // Continue with other entity types if one fails
             results.results[entityType] = { error: `Failed to search ${entityType}` };
@@ -994,15 +992,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           query: args.query,
           limit: args.limit || 50
         };
-        if (args.box) params.box = args.box;
-        if (args.group) params.group = args.group;
+        if (args.cursor) params.cursor = args.cursor;
 
         const response = await httpClient.get("/devices", { params });
-        // Handle both array and object responses
-        const data = Array.isArray(response.data) 
-          ? { count: response.data.length, results: response.data }
-          : response.data;
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
       }
 
       case "search_alarms": {
@@ -1010,12 +1003,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           query: args.query,
           limit: args.limit || 50
         };
-        if (args.status && args.status !== "all") {
-          params.query += ` status:${args.status}`;
-        }
-        if (args.type) {
-          params.query += ` type:${args.type}`;
-        }
+        if (args.cursor) params.cursor = args.cursor;
 
         const response = await httpClient.get("/alarms", { params });
         return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
@@ -1026,12 +1014,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           query: args.query,
           limit: args.limit || 50
         };
-        if (args.protocol && args.protocol !== "any") {
-          params.query += ` protocol:${args.protocol}`;
-        }
-        if (args.direction) {
-          params.query += ` direction:${args.direction}`;
-        }
+        if (args.cursor) params.cursor = args.cursor;
 
         const response = await httpClient.get("/flows", { params });
         return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };

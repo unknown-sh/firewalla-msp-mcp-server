@@ -333,29 +333,107 @@ The server provides **26 tools** across **8 API categories** for comprehensive F
 
 ### Search API
 
-- **search_global** - Search across all entity types
-  - Required: `query` - Search query string
-  - Optional: `types` - Array of entity types to search: `["devices", "alarms", "rules", "flows", "boxes"]`
-  - Optional: `limit` - Max results per entity type (1-100, default: 10)
-  - Optional: `group` - Filter by specific box group ID
+Based on comprehensive API testing, search is supported on 4 out of 8 data model types using Firewalla's advanced query syntax.
 
-- **search_devices** - Search for devices by name, MAC, or IP
-  - Required: `query` - Search query (device name, MAC, IP, etc.)
-  - Optional: `box` - Filter by specific box ID
-  - Optional: `group` - Filter by specific box group ID
-  - Optional: `limit` - Maximum results (1-200, default: 50)
+#### Supported Search Types
+- **Devices** - Full text search and device-specific qualifiers
+- **Alarms** - Advanced filtering with alarm-specific qualifiers  
+- **Flows** - Comprehensive search with flow-specific qualifiers
+- **Boxes** - Basic query support
 
-- **search_alarms** - Search for alarms by type, message, or properties
-  - Required: `query` - Search query (alarm message, type, etc.)
-  - Optional: `status` - Filter by alarm status: `active`, `resolved`, `all`
-  - Optional: `type` - Filter by specific alarm type
-  - Optional: `limit` - Maximum results (1-200, default: 50)
+#### Search Tools
 
-- **search_flows** - Search for network flows by destination, port, or protocol
-  - Required: `query` - Search query (destination, port, protocol, etc.)
-  - Optional: `protocol` - Filter by protocol: `tcp`, `udp`, `icmp`, `any`
-  - Optional: `direction` - Filter by direction: `inbound`, `outbound`, `bidirection`
-  - Optional: `limit` - Maximum results (1-200, default: 50)
+- **search_global** - Search across all searchable entity types
+  - Required: `query` - Search query using Firewalla syntax
+  - Optional: `types` - Array of entity types: `["devices", "alarms", "flows", "boxes"]`
+  - Optional: `limit` - Max results per type (1-500, default: 10)
+  - Optional: `cursor` - Pagination cursor for continuing results
+
+- **search_devices** - Search devices with device-specific qualifiers
+  - Required: `query` - Search query with qualifiers: `device.name`, `device.id`, `box.id`, `box.name`, `box.group.id`
+  - Optional: `limit` - Maximum results (1-500, default: 50)
+  - Optional: `cursor` - Pagination cursor
+
+- **search_alarms** - Search alarms with alarm-specific qualifiers
+  - Required: `query` - Search query with qualifiers: `ts`, `type`, `status`, `box.id`, `box.name`, `box.group.id`, `device.id`, `device.name`, `remote.category`, `remote.domain`, `remote.region`, `transfer.download`, `transfer.upload`, `transfer.total`
+  - Optional: `limit` - Maximum results (1-500, default: 50)
+  - Optional: `cursor` - Pagination cursor
+
+- **search_flows** - Search flows with flow-specific qualifiers
+  - Required: `query` - Search query with qualifiers: `ts`, `status`, `direction`, `box.id`, `box.name`, `box.group.id`, `device.id`, `device.name`, `category`, `domain`, `region`, `sport`, `dport`, `download`, `upload`, `total`
+  - Optional: `limit` - Maximum results (1-500, default: 50)
+  - Optional: `cursor` - Pagination cursor
+
+#### Query Syntax
+
+Firewalla search supports advanced query syntax:
+
+**Basic Text Search:**
+```
+"iPhone"
+"MacBook Pro"
+apple
+```
+
+**Qualified Search:**
+```
+status:active
+device.name:iPhone
+box.name:"Gold Plus"
+```
+
+**Wildcard Search:**
+```
+device.name:*iphone*
+domain:*.google.com
+```
+
+**Numeric Comparisons:**
+```
+ts:>1720000000
+download:>1MB
+total:>=500KB
+transfer.total:<100MB
+```
+
+**Range Search:**
+```
+ts:1720000000-1720086400
+download:100KB-1MB
+```
+
+**Combined Queries:**
+```
+status:active type:1
+direction:outbound domain:*google*
+device.name:*iphone* ts:>1720000000
+```
+
+**Exclusion Search:**
+```
+-status:resolved
+-type:1
+```
+
+#### Supported Units
+- B (Byte)
+- KB (1000 B)  
+- MB (1000 KB)
+- GB (1000 MB)
+- TB (1000 GB)
+
+#### Timestamp Format
+Use Unix timestamps (seconds since epoch):
+```
+ts:>1720000000          # After specific time
+ts:1720000000-1720086400 # Time range
+```
+
+#### Non-Searchable Types
+These endpoints do not support search queries:
+- Target Lists (`list_target_lists`)
+- Statistics (`get_statistics`, `get_simple_statistics`)
+- Trends (`get_trends`)
 
 ## Query Syntax
 

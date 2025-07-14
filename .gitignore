@@ -60,6 +60,7 @@ htmlcov/
 .nox/
 .pytest_cache/
 .phpunit.result.cache
+tests/
 
 # Package managers
 pnpm-lock.yaml
