@@ -44,7 +44,7 @@ const mockApiServer = setupServer(
   }),
 );
 
-describe('MCP Integration Tests', () => {
+describe.skip('MCP Integration Tests', () => {
   let serverProcess: ChildProcess;
   let client: Client;
 

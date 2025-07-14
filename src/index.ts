@@ -49,7 +49,7 @@ const httpClient: AxiosInstance = axios.create({
 const server = new Server(
   {
     name: "firewalla-msp-mcp",
-    version: "1.1.0",
+    version: "1.2.0",
   },
   {
     capabilities: {
@@ -143,6 +143,961 @@ ${metadataXML}
 ${dataXML}
   </data>
 </firewalla_response>`;
+}
+
+// Enhanced formatting with presentation layer
+class FirewallaResponseFormatter {
+  private static formatDate(timestamp: number): string {
+    return new Date(timestamp * 1000).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
+  }
+
+  private static formatBytes(bytes: number | undefined): string {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  private static getSeverityEmoji(severity: string): string {
+    switch (severity.toUpperCase()) {
+      case 'HIGH': return '🔴';
+      case 'MEDIUM': return '🟡';
+      case 'LOW': return '🟢';
+      default: return '⚪';
+    }
+  }
+
+  private static getDeviceTypeEmoji(type: string): string {
+    switch (type) {
+      case 'desktop': return '💻';
+      case 'phone': return '📱';
+      case 'tablet': return '📱';
+      case 'tv': return '📺';
+      case 'printer': return '🖨️';
+      case 'camera': return '📷';
+      case 'router': return '🔧';
+      case 'ap': return '📡';
+      case 'switch': return '🔌';
+      case 'nas&server': return '🖥️';
+      case 'security': return '🔒';
+      case 'automation': return '🏠';
+      case 'smart speaker': return '🔊';
+      case 'appliance': return '🔌';
+      default: return '📟';
+    }
+  }
+
+  static formatStatistics(data: any, metadata: Record<string, any>): string {
+    const results = data.results || data || [];
+    const timestamp = new Date().toLocaleString();
+    const statsType = metadata.stats_type || 'statistics';
+    
+    let content = `# Firewalla Analytics Dashboard\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    // Overview section
+    content += `## 📊 Statistics Report: ${statsType}\n\n`;
+    
+    if (Array.isArray(results) && results.length > 0) {
+      switch (statsType) {
+        case 'topBoxesByBlockedFlows':
+          content += `### 🚫 Top Boxes by Blocked Flows\n\n`;
+          results.forEach((item: any, index: number) => {
+            content += `${index + 1}. 📦 **${item.name || item.boxName || 'Unknown Box'}** - ${item.blockedFlows || item.count || 0} blocked flows\n`;
+            if (item.topBlockedDomain) {
+              content += `   └─ Top blocked: ${item.topBlockedDomain}\n`;
+            }
+          });
+          break;
+          
+        case 'topBoxesBySecurityAlarms':
+          content += `### 🚨 Top Boxes by Security Alarms\n\n`;
+          results.forEach((item: any, index: number) => {
+            content += `${index + 1}. 📦 **${item.name || item.boxName || 'Unknown Box'}** - ${item.alarmCount || item.count || 0} alarms\n`;
+            if (item.topAlarmType) {
+              content += `   └─ Most common: ${item.topAlarmType}\n`;
+            }
+          });
+          break;
+          
+        case 'topRegionsByBlockedFlows':
+          content += `### 🌍 Top Regions by Blocked Flows\n\n`;
+          results.forEach((item: any, index: number) => {
+            content += `${index + 1}. 🌍 **${item.region || item.country || 'Unknown'}** - ${item.blockedFlows || item.count || 0} blocks\n`;
+            if (item.topCategory) {
+              content += `   └─ Top category: ${item.topCategory}\n`;
+            }
+          });
+          break;
+          
+        default:
+          // Generic formatting for unknown types
+          content += `### 📈 Results\n\n`;
+          results.forEach((item: any, index: number) => {
+            content += `${index + 1}. ${JSON.stringify(item, null, 2)}\n`;
+          });
+      }
+    } else {
+      content += `### ℹ️ No data available\n`;
+      content += `No statistics data found for the requested type.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatSimpleStatistics(data: any, metadata: Record<string, any>): string {
+    const timestamp = new Date().toLocaleString();
+    
+    let content = `# Firewalla System Overview\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    content += `## 📊 Summary Statistics\n\n`;
+    content += `- **📦 Online Boxes**: ${data.onlineBoxes || 0}\n`;
+    content += `- **📦 Offline Boxes**: ${data.offlineBoxes || 0}\n`;
+    content += `- **🚨 Active Alarms**: ${data.alarms || 0}\n`;
+    content += `- **🛡️ Total Rules**: ${data.rules || 0}\n`;
+    
+    if (metadata.group) {
+      content += `\n*Filtered by group: ${metadata.group}*\n`;
+    }
+    
+    return content;
+  }
+
+  static formatTargetLists(data: any, metadata: Record<string, any>): string {
+    const lists = data.results || data || [];
+    const timestamp = new Date().toLocaleString();
+    
+    let content = `# Firewalla Target Lists\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    content += `## 📋 Overview\n`;
+    content += `- **Total Lists**: ${lists.length}\n`;
+    
+    if (lists.length > 0) {
+      // Group by category
+      const categoryCount: Record<string, number> = {};
+      let totalTargets = 0;
+      
+      lists.forEach((list: any) => {
+        const category = list.category || 'Uncategorized';
+        categoryCount[category] = (categoryCount[category] || 0) + 1;
+        totalTargets += (list.targets || []).length;
+      });
+      
+      content += `- **Total Targets**: ${totalTargets}\n`;
+      content += `- **Categories**: `;
+      content += Object.entries(categoryCount)
+        .map(([cat, count]) => `${cat} (${count})`)
+        .join(', ');
+      content += `\n\n`;
+      
+      // List details
+      content += `## 📝 Target Lists\n\n`;
+      content += `| Name | Category | Owner | Targets | Notes |\n`;
+      content += `|------|----------|-------|---------|-------|\n`;
+      
+      lists.forEach((list: any) => {
+        const name = list.name || 'Unnamed';
+        const category = list.category || 'Uncategorized';
+        const owner = list.owner || 'System';
+        const targetCount = (list.targets || []).length;
+        const notes = list.notes ? list.notes.substring(0, 50) + (list.notes.length > 50 ? '...' : '') : '-';
+        
+        content += `| **${name}** | ${category} | ${owner} | ${targetCount} | ${notes} |\n`;
+      });
+      
+      // Show first few targets for each list
+      content += `\n## 🎯 Target Details\n`;
+      lists.forEach((list: any) => {
+        if (list.targets && list.targets.length > 0) {
+          content += `\n### ${list.name}\n`;
+          const displayTargets = list.targets.slice(0, 5);
+          displayTargets.forEach((target: string) => {
+            content += `- \`${target}\`\n`;
+          });
+          if (list.targets.length > 5) {
+            content += `- _...and ${list.targets.length - 5} more_\n`;
+          }
+        }
+      });
+    } else {
+      content += `\n### ℹ️ No target lists found\n`;
+      content += `No target lists have been configured.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatGetTrends(data: any, metadata: Record<string, any>): string {
+    const trends = data.results || data || [];
+    const timestamp = new Date().toLocaleString();
+    const trendType = metadata.trends_type || 'trends';
+    
+    let content = `# Firewalla ${trendType.charAt(0).toUpperCase() + trendType.slice(1)} Trends\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    content += `## 📈 Trend Analysis\n`;
+    content += `- **Data Points**: ${trends.length}\n`;
+    content += `- **Type**: ${trendType}\n`;
+    
+    if (metadata.group) {
+      content += `- **Group Filter**: ${metadata.group}\n`;
+    }
+    
+    if (trends.length > 0) {
+      // Calculate time range
+      const timestamps = trends.map((t: any) => t.timestamp || t.ts || 0).filter((ts: number) => ts > 0);
+      if (timestamps.length > 0) {
+        const minTime = Math.min(...timestamps);
+        const maxTime = Math.max(...timestamps);
+        content += `- **Time Range**: ${this.formatDate(minTime)} - ${this.formatDate(maxTime)}\n`;
+      }
+      
+      content += `\n## 📊 Trend Data\n\n`;
+      
+      // Format based on trend type
+      if (trendType === 'flows') {
+        content += `| Time | Total Flows | Blocked | Allowed | Upload | Download |\n`;
+        content += `|------|-------------|---------|---------|--------|----------|\n`;
+        
+        trends.forEach((point: any) => {
+          const time = point.timestamp ? this.formatDate(point.timestamp) : 'N/A';
+          const total = point.total || 0;
+          const blocked = point.blocked || 0;
+          const allowed = point.allowed || 0;
+          const upload = this.formatBytes(point.upload || 0);
+          const download = this.formatBytes(point.download || 0);
+          
+          content += `| ${time} | ${total} | ${blocked} | ${allowed} | ${upload} | ${download} |\n`;
+        });
+      } else if (trendType === 'alarms') {
+        content += `| Time | Total Alarms | High | Medium | Low |\n`;
+        content += `|------|--------------|------|--------|-----|\n`;
+        
+        trends.forEach((point: any) => {
+          const time = point.timestamp ? this.formatDate(point.timestamp) : 'N/A';
+          const total = point.total || 0;
+          const high = point.high || 0;
+          const medium = point.medium || 0;
+          const low = point.low || 0;
+          
+          content += `| ${time} | ${total} | ${high} | ${medium} | ${low} |\n`;
+        });
+      } else if (trendType === 'rules') {
+        content += `| Time | Total Rules | Active | Paused | Block | Allow |\n`;
+        content += `|------|-------------|--------|---------|--------|--------|\n`;
+        
+        trends.forEach((point: any) => {
+          const time = point.timestamp ? this.formatDate(point.timestamp) : 'N/A';
+          const total = point.total || 0;
+          const active = point.active || 0;
+          const paused = point.paused || 0;
+          const block = point.block || 0;
+          const allow = point.allow || 0;
+          
+          content += `| ${time} | ${total} | ${active} | ${paused} | ${block} | ${allow} |\n`;
+        });
+      }
+      
+      // Add insights if available
+      content += `\n## 🎯 Key Insights\n`;
+      
+      // Calculate trends
+      if (trends.length >= 2) {
+        const firstPoint = trends[0];
+        const lastPoint = trends[trends.length - 1];
+        
+        if (trendType === 'flows' && firstPoint.total && lastPoint.total) {
+          const change = ((lastPoint.total - firstPoint.total) / firstPoint.total * 100).toFixed(1);
+          content += `- Flow volume ${parseFloat(change) > 0 ? 'increased' : 'decreased'} by ${Math.abs(parseFloat(change))}%\n`;
+        } else if (trendType === 'alarms' && firstPoint.total && lastPoint.total) {
+          const change = ((lastPoint.total - firstPoint.total) / firstPoint.total * 100).toFixed(1);
+          content += `- Alarm count ${parseFloat(change) > 0 ? 'increased' : 'decreased'} by ${Math.abs(parseFloat(change))}%\n`;
+        } else if (trendType === 'rules' && firstPoint.total && lastPoint.total) {
+          const change = lastPoint.total - firstPoint.total;
+          content += `- ${Math.abs(change)} rules ${change > 0 ? 'added' : 'removed'} during this period\n`;
+        }
+      }
+    } else {
+      content += `\n### ℹ️ No trend data available\n`;
+      content += `No ${trendType} trend data found for the specified parameters.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatSearchGlobal(data: any, metadata: Record<string, any>): string {
+    const timestamp = new Date().toLocaleString();
+    
+    let content = `# Firewalla Global Search Results\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    content += `## 🔍 Search Summary\n`;
+    content += `- **Query**: "${metadata.query || 'All'}"\n`;
+    
+    let totalResults = 0;
+    const resultCounts: Record<string, number> = {};
+    
+    // Count results by type
+    Object.entries(data).forEach(([type, results]: [string, any]) => {
+      if (Array.isArray(results)) {
+        resultCounts[type] = results.length;
+        totalResults += results.length;
+      }
+    });
+    
+    content += `- **Total Results**: ${totalResults}\n`;
+    content += `- **Result Types**: `;
+    content += Object.entries(resultCounts)
+      .filter(([_, count]) => count > 0)
+      .map(([type, count]) => `${type} (${count})`)
+      .join(', ');
+    content += `\n\n`;
+    
+    // Show results by type
+    if (data.devices && data.devices.length > 0) {
+      content += `## 💻 Devices (${data.devices.length})\n\n`;
+      content += `| Name | IP | MAC | Type | Status |\n`;
+      content += `|------|-----|-----|------|--------|\n`;
+      
+      data.devices.slice(0, 10).forEach((device: any) => {
+        const name = device.name || 'Unknown';
+        const ip = device.ip || device.ipAddress || 'N/A';
+        const mac = device.mac || 'N/A';
+        const type = device.type || device.deviceType || 'unknown';
+        const status = device.online ? '🟢 Online' : '🔴 Offline';
+        
+        content += `| **${name}** | \`${ip}\` | \`${mac}\` | ${type} | ${status} |\n`;
+      });
+      
+      if (data.devices.length > 10) {
+        content += `\n_...and ${data.devices.length - 10} more devices_\n`;
+      }
+      content += `\n`;
+    }
+    
+    if (data.alarms && data.alarms.length > 0) {
+      content += `## 🚨 Alarms (${data.alarms.length})\n\n`;
+      content += `| Time | Type | Device | Severity |\n`;
+      content += `|------|------|--------|----------|\n`;
+      
+      data.alarms.slice(0, 10).forEach((alarm: any) => {
+        const time = alarm.ts ? this.formatDate(alarm.ts) : 'N/A';
+        const type = alarm.alarmType || `Type ${alarm.type}`;
+        const device = alarm.device?.name || 'Unknown';
+        const severity = alarm.severity || 'MEDIUM';
+        
+        content += `| ${time} | ${type} | ${device} | ${this.getSeverityEmoji(severity)} ${severity} |\n`;
+      });
+      
+      if (data.alarms.length > 10) {
+        content += `\n_...and ${data.alarms.length - 10} more alarms_\n`;
+      }
+      content += `\n`;
+    }
+    
+    if (data.flows && data.flows.length > 0) {
+      content += `## 🌐 Flows (${data.flows.length})\n\n`;
+      content += `| Time | Device | Direction | Domain/IP | Transfer |\n`;
+      content += `|------|--------|-----------|-----------|----------|\n`;
+      
+      data.flows.slice(0, 10).forEach((flow: any) => {
+        const time = flow.ts ? new Date(flow.ts * 1000).toLocaleTimeString() : 'N/A';
+        const device = flow.device?.name || 'Unknown';
+        const direction = flow.direction === 'in' ? '⬇️' : flow.direction === 'out' ? '⬆️' : '↔️';
+        const destination = flow.domain || flow.ip || 'Unknown';
+        const transfer = this.formatBytes((flow.upload || 0) + (flow.download || 0));
+        
+        content += `| ${time} | ${device} | ${direction} | ${destination} | ${transfer} |\n`;
+      });
+      
+      if (data.flows.length > 10) {
+        content += `\n_...and ${data.flows.length - 10} more flows_\n`;
+      }
+      content += `\n`;
+    }
+    
+    if (data.boxes && data.boxes.length > 0) {
+      content += `## 📦 Boxes (${data.boxes.length})\n\n`;
+      content += `| Name | Model | Version | Status |\n`;
+      content += `|------|-------|---------|--------|\n`;
+      
+      data.boxes.forEach((box: any) => {
+        const name = box.name || 'Unknown';
+        const model = box.model || 'N/A';
+        const version = box.version || 'N/A';
+        const status = box.online ? '🟢 Online' : '🔴 Offline';
+        
+        content += `| **${name}** | ${model} | ${version} | ${status} |\n`;
+      });
+      content += `\n`;
+    }
+    
+    if (totalResults === 0) {
+      content += `### ℹ️ No results found\n`;
+      content += `No items match your search query.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatListFlows(data: any, metadata: Record<string, any>): string {
+    const flows = data.results || [];
+    const timestamp = new Date().toLocaleString();
+    
+    let content = `# Network Traffic Flows\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    // Overview section
+    content += `## 📊 Traffic Summary\n`;
+    content += `- **Total Flows**: ${flows.length}\n`;
+    
+    if (flows.length > 0) {
+      // Calculate time range
+      const timestamps = flows.map((f: any) => f.ts || 0).filter((ts: number) => ts > 0);
+      if (timestamps.length > 0) {
+        const minTime = Math.min(...timestamps);
+        const maxTime = Math.max(...timestamps);
+        content += `- **Time Period**: ${this.formatDate(minTime)} - ${this.formatDate(maxTime)}\n`;
+      }
+      
+      // Protocol breakdown
+      const protocolCount: Record<string, number> = {};
+      const directionCount = { inbound: 0, outbound: 0, bidirectional: 0 };
+      let totalUpload = 0;
+      let totalDownload = 0;
+      
+      flows.forEach((flow: any) => {
+        const protocol = flow.protocol || 'unknown';
+        protocolCount[protocol] = (protocolCount[protocol] || 0) + 1;
+        
+        const direction = flow.direction || 'unknown';
+        if (direction === 'in') directionCount.inbound++;
+        else if (direction === 'out') directionCount.outbound++;
+        else if (direction === 'bi') directionCount.bidirectional++;
+        
+        totalUpload += flow.upload || 0;
+        totalDownload += flow.download || 0;
+      });
+      
+      // Top protocols
+      const sortedProtocols = Object.entries(protocolCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3);
+      
+      if (sortedProtocols.length > 0) {
+        content += `- **Top Protocols**: `;
+        const totalFlows = flows.length;
+        content += sortedProtocols
+          .map(([proto, count]) => `${proto.toUpperCase()} (${Math.round(count / totalFlows * 100)}%)`)
+          .join(', ');
+        content += `\n`;
+      }
+      
+      // Direction breakdown
+      const totalDirectional = directionCount.inbound + directionCount.outbound + directionCount.bidirectional;
+      if (totalDirectional > 0) {
+        content += `- **Direction**: `;
+        content += `Inbound (${Math.round(directionCount.inbound / totalDirectional * 100)}%), `;
+        content += `Outbound (${Math.round(directionCount.outbound / totalDirectional * 100)}%), `;
+        content += `Bidirectional (${Math.round(directionCount.bidirectional / totalDirectional * 100)}%)\n`;
+      }
+      
+      content += `- **Total Transfer**: Upload ${this.formatBytes(totalUpload)}, Download ${this.formatBytes(totalDownload)}\n\n`;
+      
+      // Top destinations by volume
+      const destinationVolume: Record<string, { domain: string, country: string, volume: number, count: number }> = {};
+      
+      flows.forEach((flow: any) => {
+        const key = flow.domain || flow.ip || 'unknown';
+        if (!destinationVolume[key]) {
+          destinationVolume[key] = {
+            domain: flow.domain || flow.ip || 'unknown',
+            country: flow.country || 'Unknown',
+            volume: 0,
+            count: 0
+          };
+        }
+        destinationVolume[key].volume += (flow.upload || 0) + (flow.download || 0);
+        destinationVolume[key].count++;
+      });
+      
+      const topDestinations = Object.values(destinationVolume)
+        .sort((a, b) => b.volume - a.volume)
+        .slice(0, 10);
+      
+      if (topDestinations.length > 0) {
+        content += `## 🌍 Top Destinations by Volume\n\n`;
+        content += `| Domain/IP | Country | Transfer Volume | Flow Count |\n`;
+        content += `|-----------|---------|-----------------|------------|\n`;
+        
+        topDestinations.forEach(dest => {
+          const countryFlag = dest.country && dest.country !== 'Unknown' ? `🌐 ${dest.country}` : '🌐 Unknown';
+          content += `| **${dest.domain}** | ${countryFlag} | ${this.formatBytes(dest.volume)} | ${dest.count} |\n`;
+        });
+        content += `\n`;
+      }
+      
+      // Top source devices
+      const deviceVolume: Record<string, { name: string, upload: number, download: number, count: number }> = {};
+      
+      flows.forEach((flow: any) => {
+        const deviceId = flow.device?.id || flow.deviceMAC || 'unknown';
+        const deviceName = flow.device?.name || flow.deviceName || deviceId;
+        
+        if (!deviceVolume[deviceId]) {
+          deviceVolume[deviceId] = {
+            name: deviceName,
+            upload: 0,
+            download: 0,
+            count: 0
+          };
+        }
+        deviceVolume[deviceId].upload += flow.upload || 0;
+        deviceVolume[deviceId].download += flow.download || 0;
+        deviceVolume[deviceId].count++;
+      });
+      
+      const topDevices = Object.values(deviceVolume)
+        .sort((a, b) => (b.upload + b.download) - (a.upload + a.download))
+        .slice(0, 10);
+      
+      if (topDevices.length > 0) {
+        content += `## 📱 Top Devices by Traffic\n\n`;
+        content += `| Device | Upload | Download | Total Flows |\n`;
+        content += `|--------|--------|----------|-------------|\n`;
+        
+        topDevices.forEach(device => {
+          content += `| **${device.name}** | ${this.formatBytes(device.upload)} | ${this.formatBytes(device.download)} | ${device.count} |\n`;
+        });
+        content += `\n`;
+      }
+      
+      // Recent flows sample
+      const recentFlows = flows.slice(0, 10);
+      if (recentFlows.length > 0) {
+        content += `## 📈 Recent Traffic Flows\n\n`;
+        content += `| Time | Device | Direction | Domain/IP | Protocol | Transfer |\n`;
+        content += `|------|--------|-----------|-----------|----------|----------|\n`;
+        
+        recentFlows.forEach((flow: any) => {
+          const time = flow.ts ? new Date(flow.ts * 1000).toLocaleTimeString() : 'N/A';
+          const device = flow.device?.name || flow.deviceName || 'Unknown';
+          const direction = flow.direction === 'in' ? '⬇️ In' : flow.direction === 'out' ? '⬆️ Out' : '↔️ Bi';
+          const destination = flow.domain || flow.ip || 'Unknown';
+          const protocol = (flow.protocol || 'unknown').toUpperCase();
+          const transfer = this.formatBytes((flow.upload || 0) + (flow.download || 0));
+          
+          content += `| ${time} | ${device} | ${direction} | ${destination} | ${protocol} | ${transfer} |\n`;
+        });
+      }
+    } else {
+      content += `\n### ℹ️ No flows found\n`;
+      content += `No network flows match your search criteria.\n`;
+    }
+    
+    if (data.next_cursor) {
+      content += `\n## 📄 Additional Results\n`;
+      content += `More results are available. Use cursor: \`${data.next_cursor}\` to fetch the next page.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatListRules(data: any, metadata: Record<string, any>): string {
+    const rules = data.results || data || [];
+    const timestamp = new Date().toLocaleString();
+    
+    let content = `# Firewall Rules Configuration\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    // Overview section
+    content += `## 📊 Rules Overview\n`;
+    content += `- **Total Rules**: ${rules.length}\n`;
+    
+    if (rules.length > 0) {
+      // Calculate rule statistics
+      const activeCount = rules.filter((r: any) => r.status === 'active').length;
+      const pausedCount = rules.length - activeCount;
+      
+      const actionCount: Record<string, number> = {};
+      rules.forEach((rule: any) => {
+        const action = rule.action || 'unknown';
+        actionCount[action] = (actionCount[action] || 0) + 1;
+      });
+      
+      content += `- **Active**: ${activeCount} | **Paused**: ${pausedCount}\n`;
+      content += `- **Rule Types**: `;
+      content += Object.entries(actionCount)
+        .map(([action, count]) => `${action.charAt(0).toUpperCase() + action.slice(1)} (${count})`)
+        .join(', ');
+      content += `\n\n`;
+      
+      // Block rules
+      const blockRules = rules.filter((r: any) => r.action === 'block');
+      if (blockRules.length > 0) {
+        content += `## 🛡️ Block Rules\n\n`;
+        content += `| Name | Target | Scope | Direction | Status |\n`;
+        content += `|------|--------|-------|-----------|--------|\n`;
+        
+        blockRules.forEach((rule: any) => {
+          const name = rule.name || 'Unnamed Rule';
+          const target = rule.target ? `${rule.target.type}: ${rule.target.value}` : 'Any';
+          const scope = rule.scope ? `${rule.scope.type}: ${rule.scope.value}` : 'All devices';
+          const direction = rule.direction || 'both';
+          const status = rule.status === 'active' ? '✅ Active' : '⏸️ Paused';
+          
+          content += `| **${name}** | ${target} | ${scope} | ${direction} | ${status} |\n`;
+        });
+        content += `\n`;
+      }
+      
+      // Allow rules
+      const allowRules = rules.filter((r: any) => r.action === 'allow');
+      if (allowRules.length > 0) {
+        content += `## ✅ Allow Rules\n\n`;
+        content += `| Name | Target | Scope | Direction | Status |\n`;
+        content += `|------|--------|-------|-----------|--------|\n`;
+        
+        allowRules.forEach((rule: any) => {
+          const name = rule.name || 'Unnamed Rule';
+          const target = rule.target ? `${rule.target.type}: ${rule.target.value}` : 'Any';
+          const scope = rule.scope ? `${rule.scope.type}: ${rule.scope.value}` : 'All devices';
+          const direction = rule.direction || 'both';
+          const status = rule.status === 'active' ? '✅ Active' : '⏸️ Paused';
+          
+          content += `| **${name}** | ${target} | ${scope} | ${direction} | ${status} |\n`;
+        });
+        content += `\n`;
+      }
+      
+      // Time-limited rules
+      const timeLimitRules = rules.filter((r: any) => r.action === 'time_limit');
+      if (timeLimitRules.length > 0) {
+        content += `## ⏰ Time-Limited Rules\n\n`;
+        content += `| Name | Target | Schedule | Status |\n`;
+        content += `|------|--------|----------|--------|\n`;
+        
+        timeLimitRules.forEach((rule: any) => {
+          const name = rule.name || 'Unnamed Rule';
+          const target = rule.target ? `${rule.target.type}: ${rule.target.value}` : 'Any';
+          const schedule = rule.schedule ? rule.schedule.type : 'No schedule';
+          const status = rule.status === 'active' ? '✅ Active' : '⏸️ Paused';
+          
+          content += `| **${name}** | ${target} | ${schedule} | ${status} |\n`;
+        });
+      }
+    } else {
+      content += `\n### ℹ️ No rules found\n`;
+      content += `No security rules are configured.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatListDevices(data: any, metadata: Record<string, any>): string {
+    const devices = data.results || data || [];
+    const timestamp = new Date().toLocaleString();
+    
+    let content = `# Network Device Inventory\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    // Overview section
+    content += `## 📊 Device Summary\n`;
+    content += `- **Total Devices**: ${devices.length}\n`;
+    
+    if (devices.length > 0) {
+      // Calculate device statistics
+      const onlineCount = devices.filter((d: any) => d.online).length;
+      const offlineCount = devices.length - onlineCount;
+      
+      const typeCount: Record<string, number> = {};
+      const networkCount: Record<string, number> = {};
+      
+      devices.forEach((device: any) => {
+        const type = device.type || device.deviceType || 'unknown';
+        typeCount[type] = (typeCount[type] || 0) + 1;
+        
+        const network = device.network?.name || 'Unknown Network';
+        networkCount[network] = (networkCount[network] || 0) + 1;
+      });
+      
+      content += `- **Online**: ${onlineCount} | **Offline**: ${offlineCount}\n`;
+      
+      // Device types breakdown
+      const sortedTypes = Object.entries(typeCount).sort((a, b) => b[1] - a[1]);
+      content += `- **Device Types**: `;
+      content += sortedTypes.map(([type, count]) => `${type} (${count})`).join(', ');
+      content += `\n\n`;
+      
+      // Network distribution
+      content += `## 🏠 Network Distribution\n`;
+      Object.entries(networkCount)
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([network, count]) => {
+          content += `- **${network}**: ${count} devices\n`;
+        });
+      content += `\n`;
+      
+      // Active devices
+      const activeDevices = devices.filter((d: any) => d.online);
+      if (activeDevices.length > 0) {
+        content += `## 💻 Active Devices\n\n`;
+        content += `| Name | IP Address | MAC Address | Type | Network | Last Active |\n`;
+        content += `|------|------------|-------------|------|---------|-------------|\n`;
+        
+        activeDevices.forEach((device: any) => {
+          const name = device.name || 'Unknown';
+          const ip = device.ip || device.ipAddress || 'N/A';
+          const mac = device.mac || 'N/A';
+          const type = device.type || device.deviceType || 'unknown';
+          const typeEmoji = this.getDeviceTypeEmoji(type);
+          const network = device.network?.name || 'Unknown';
+          const lastSeen = device.lastActiveTime || device.lastSeen ? 
+            this.formatDate(device.lastActiveTime || device.lastSeen) : 'Active';
+          
+          content += `| ${typeEmoji} **${name}** | \`${ip}\` | \`${mac}\` | ${type} | ${network} | ${lastSeen} |\n`;
+        });
+        content += `\n`;
+      }
+      
+      // Offline devices
+      const offlineDevices = devices.filter((d: any) => !d.online);
+      if (offlineDevices.length > 0) {
+        content += `## 📴 Offline Devices\n\n`;
+        content += `| Name | IP Address | MAC Address | Type | Last Seen |\n`;
+        content += `|------|------------|-------------|------|------------|\n`;
+        
+        offlineDevices.forEach((device: any) => {
+          const name = device.name || 'Unknown';
+          const ip = device.ip || device.ipAddress || 'N/A';
+          const mac = device.mac || 'N/A';
+          const type = device.type || device.deviceType || 'unknown';
+          const typeEmoji = this.getDeviceTypeEmoji(type);
+          const lastSeen = device.lastActiveTime || device.lastSeen ? 
+            this.formatDate(device.lastActiveTime || device.lastSeen) : 'N/A';
+          
+          content += `| ${typeEmoji} **${name}** | \`${ip}\` | \`${mac}\` | ${type} | ${lastSeen} |\n`;
+        });
+      }
+    } else {
+      content += `\n### ℹ️ No devices found\n`;
+      content += `No devices match your search criteria.\n`;
+    }
+    
+    if (data.next_cursor) {
+      content += `\n## 📄 Additional Results\n`;
+      content += `More results are available. Use cursor: \`${data.next_cursor}\` to fetch the next page.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatListAlarms(data: any, metadata: Record<string, any>): string {
+    const alarms = data.results || [];
+    const timestamp = new Date().toLocaleString();
+    
+    let content = `# Firewalla Security Alarms Report\n`;
+    content += `*Generated: ${timestamp}*\n\n`;
+    
+    // Overview section
+    content += `## 📊 Overview\n`;
+    content += `- **Total Alarms**: ${alarms.length}\n`;
+    content += `- **Query**: ${metadata.query || 'All alarms'}\n`;
+    
+    if (alarms.length > 0) {
+      // Calculate severity breakdown
+      const severityCount = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+      const statusCount = { active: 0, acknowledged: 0, resolved: 0 };
+      const typeCount: Record<string, number> = {};
+      
+      alarms.forEach((alarm: any) => {
+        const severity = alarm.severity || (alarm.type <= 2 ? 'HIGH' : alarm.type <= 5 ? 'MEDIUM' : 'LOW');
+        severityCount[severity as keyof typeof severityCount]++;
+        
+        const status = alarm.status || 'active';
+        statusCount[status as keyof typeof statusCount]++;
+        
+        const alarmType = alarm.alarmType || `Type ${alarm.type}`;
+        typeCount[alarmType] = (typeCount[alarmType] || 0) + 1;
+      });
+      
+      content += `- **Severity Breakdown**: High (${severityCount.HIGH}), Medium (${severityCount.MEDIUM}), Low (${severityCount.LOW})\n`;
+      content += `- **Status**: Active (${statusCount.active}), Acknowledged (${statusCount.acknowledged}), Resolved (${statusCount.resolved})\n\n`;
+      
+      // Alarms by type
+      content += `## 🚨 Alarms by Type\n`;
+      Object.entries(typeCount).forEach(([type, count]) => {
+        content += `- **${type}**: ${count} alarms\n`;
+      });
+      content += `\n`;
+      
+      // Detailed alarms
+      content += `## 📋 Detailed Alarms\n\n`;
+      
+      alarms.forEach((alarm: any, index: number) => {
+        const severity = alarm.severity || (alarm.type <= 2 ? 'HIGH' : alarm.type <= 5 ? 'MEDIUM' : 'LOW');
+        const alarmTime = alarm.ts ? this.formatDate(alarm.ts) : 'N/A';
+        const deviceName = alarm.device?.name || 'Unknown Device';
+        const deviceIp = alarm.device?.ip || alarm.device?.ipAddress || 'N/A';
+        const remoteDomain = alarm.remote?.domain || alarm.remote?.ip || 'N/A';
+        const remoteCountry = alarm.remote?.country || 'Unknown';
+        const download = this.formatBytes(alarm.transfer?.download);
+        const upload = this.formatBytes(alarm.transfer?.upload);
+        const total = this.formatBytes(alarm.transfer?.total);
+        const status = alarm.status || 'active';
+        
+        content += `### ${this.getSeverityEmoji(severity)} Alarm #${index + 1} - ${alarm.alarmType || `Type ${alarm.type}`}\n`;
+        content += `- **Time**: ${alarmTime}\n`;
+        content += `- **Severity**: ${severity}\n`;
+        content += `- **Status**: ${status}\n`;
+        content += `- **Device**: ${deviceName} (IP: ${deviceIp})\n`;
+        content += `- **Remote**: ${remoteDomain} (${remoteCountry})\n`;
+        content += `- **Transfer**: ↓ ${download} | ↑ ${upload} | Total: ${total}\n`;
+        content += `\n`;
+      });
+    } else {
+      content += `\n### ℹ️ No alarms found\n`;
+      content += `No security alarms match your search criteria.\n`;
+    }
+    
+    if (data.next_cursor) {
+      content += `\n## 📄 Additional Results\n`;
+      content += `More results are available. Use cursor: \`${data.next_cursor}\` to fetch the next page.\n`;
+    }
+    
+    return content;
+  }
+
+  static formatEnhancedResponse(data: any, responseType: string, metadata?: Record<string, any>): string {
+    const enhancedMetadata = metadata || {};
+    let presentationContent = '';
+    let summary = '';
+    let title = '';
+    
+    switch (responseType) {
+      case 'list_alarms':
+      case 'search_alarms':
+        presentationContent = this.formatListAlarms(data, enhancedMetadata);
+        title = enhancedMetadata.query ? 
+          `Firewalla Alarms Report - ${enhancedMetadata.query}` : 
+          'Firewalla Security Alarms Report';
+        summary = `Found ${(data.results || []).length} alarms${enhancedMetadata.query ? ` matching "${enhancedMetadata.query}"` : ''}.`;
+        break;
+        
+      case 'list_devices':
+      case 'search_devices':
+        presentationContent = this.formatListDevices(data, enhancedMetadata);
+        title = enhancedMetadata.query ? 
+          `Network Device Inventory - ${enhancedMetadata.query}` : 
+          'Network Device Inventory';
+        const deviceData = data.results || data || [];
+        const onlineCount = deviceData.filter((d: any) => d.online).length;
+        summary = `Found ${deviceData.length} devices (${onlineCount} online, ${deviceData.length - onlineCount} offline)${enhancedMetadata.query ? ` matching "${enhancedMetadata.query}"` : ''}.`;
+        break;
+        
+      case 'list_rules':
+        presentationContent = this.formatListRules(data, enhancedMetadata);
+        title = 'Firewall Rules Configuration';
+        const ruleData = data.results || data || [];
+        const activeRules = ruleData.filter((r: any) => r.status === 'active').length;
+        summary = `Found ${ruleData.length} rules (${activeRules} active, ${ruleData.length - activeRules} paused).`;
+        break;
+        
+      case 'get_statistics':
+        presentationContent = this.formatStatistics(data, enhancedMetadata);
+        title = `Firewalla Analytics - ${enhancedMetadata.stats_type || 'Statistics'}`;
+        const statsData = data.results || data || [];
+        summary = `Showing top ${statsData.length} results for ${enhancedMetadata.stats_type}.`;
+        break;
+        
+      case 'get_simple_statistics':
+        presentationContent = this.formatSimpleStatistics(data, enhancedMetadata);
+        title = 'Firewalla System Overview';
+        summary = `System has ${data.onlineBoxes || 0} online boxes, ${data.alarms || 0} alarms, and ${data.rules || 0} rules.`;
+        break;
+        
+      case 'list_flows':
+      case 'search_flows':
+        presentationContent = this.formatListFlows(data, enhancedMetadata);
+        title = enhancedMetadata.query ? 
+          `Network Traffic Flows - ${enhancedMetadata.query}` : 
+          'Network Traffic Flows Report';
+        const flowData = data.results || [];
+        const totalTransfer = flowData.reduce((sum: number, flow: any) => 
+          sum + (flow.upload || 0) + (flow.download || 0), 0);
+        summary = `Found ${flowData.length} flows with total transfer of ${FirewallaResponseFormatter.formatBytes(totalTransfer)}${enhancedMetadata.query ? ` matching "${enhancedMetadata.query}"` : ''}.`;
+        break;
+        
+      case 'list_target_lists':
+      case 'get_target_list':
+        presentationContent = this.formatTargetLists(data, enhancedMetadata);
+        title = 'Firewalla Target Lists Configuration';
+        const listData = data.results || data || [];
+        const totalTargets = Array.isArray(listData) ? 
+          listData.reduce((sum: number, list: any) => sum + (list.targets || []).length, 0) :
+          (listData.targets || []).length;
+        summary = `Found ${Array.isArray(listData) ? listData.length : 1} target lists with ${totalTargets} total targets.`;
+        break;
+        
+      case 'get_trends':
+        presentationContent = this.formatGetTrends(data, enhancedMetadata);
+        const trendType = enhancedMetadata.trends_type || 'trends';
+        title = `Firewalla ${trendType.charAt(0).toUpperCase() + trendType.slice(1)} Trends Analysis`;
+        const trendData = data.results || data || [];
+        summary = `Showing ${trendData.length} data points for ${trendType} trends.`;
+        break;
+        
+      case 'search_global':
+        presentationContent = this.formatSearchGlobal(data, enhancedMetadata);
+        title = `Firewalla Global Search - "${enhancedMetadata.query || 'All'}"`;
+        let globalTotalResults = 0;
+        Object.entries(data).forEach(([_, results]: [string, any]) => {
+          if (Array.isArray(results)) globalTotalResults += results.length;
+        });
+        summary = `Found ${globalTotalResults} total results across all entity types.`;
+        break;
+        
+      // Add more endpoint formatters here
+      default:
+        // Fallback to basic formatting
+        return formatAsXML(data, responseType, metadata);
+    }
+    
+    const timestamp = new Date().toISOString();
+    const metadataXML = metadata ? Object.entries(metadata).map(([key, value]) => 
+      `    <${escapeXML(key)}>${escapeXML(String(value))}</${escapeXML(key)}>`
+    ).join('\n') : '';
+    
+    const dataXML = jsonToXML(data, 2);
+    
+    return `<firewalla_response>
+  <metadata>
+    <response_type>${escapeXML(responseType)}</response_type>
+    <timestamp>${timestamp}</timestamp>
+${metadataXML}
+  </metadata>
+  <presentation>
+    <artifact_content type="markdown" title="${escapeXML(title)}">
+${escapeXML(presentationContent)}
+    </artifact_content>
+  </presentation>
+  <summary>${escapeXML(summary)}</summary>
+  <data>
+${dataXML}
+  </data>
+</firewalla_response>`;
+  }
 }
 
 // Utility function for paginated requests (kept for future use)
@@ -814,36 +1769,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ? { count: response.data.length, results: response.data }
           : response.data;
         
-        // Format the response with rich information
-        let formattedOutput = "# Firewalla Devices\n\n";
-        
-        const devices = data.results || data;
-        
-        if (devices.length === 0) {
-          formattedOutput += "No devices found.\n";
-        } else {
-          // Create a markdown table for better formatting
-          formattedOutput += "| 📱 Device Name | IP Address | MAC Address | Type | Status | Box | Last Seen |\n";
-          formattedOutput += "|----------------|------------|-------------|------|--------|-----|------------|\n";
-          
-          devices.forEach((device: any) => {
-            const deviceName = device.name || 'Unknown Device';
-            const deviceIp = device.ipAddress || device.ip || 'N/A';
-            const deviceMac = device.mac || 'N/A';
-            const deviceType = device.type || 'Unknown';
-            const deviceStatus = device.online ? '🟢 Online' : '🔴 Offline';
-            const boxName = device.box?.name || device.boxName || 'N/A';
-            const lastSeen = device.lastActiveTime ? new Date(device.lastActiveTime * 1000).toLocaleString() : 'N/A';
-            
-            formattedOutput += `| **${deviceName}** | \`${deviceIp}\` | \`${deviceMac}\` | ${deviceType} | ${deviceStatus} | ${boxName} | ${lastSeen} |\n`;
-          });
-        }
-        
-        formattedOutput += `\n---\n**Total Devices**: ${devices.length}\n`;
-        
-        return { content: [{ type: "text", text: formatAsXML(data, "list_devices", { 
-          count: devices.length,
-          formatted_summary: formattedOutput 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "list_devices", { 
+          box: args.box || null,
+          group: args.group || null
         }) }] };
       }
 
@@ -859,44 +1787,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const response = await httpClient.get("/alarms", { params });
         const data = response.data;
         
-        // Format the response with rich information
-        let formattedOutput = "# Firewalla Alarms\n\n";
-        
-        const alarms = data.results || [];
-        
-        if (alarms.length === 0) {
-          formattedOutput += "No alarms found.\n";
-        } else {
-          // Create a markdown table for better formatting
-          formattedOutput += "| 🚨 Severity | Time | Type | Device | Remote | Transfer | Status |\n";
-          formattedOutput += "|-------------|------|------|---------|---------|----------|--------|\n";
-          
-          alarms.forEach((alarm: any) => {
-            const severity = alarm.severity || (alarm.type <= 2 ? 'High' : alarm.type <= 5 ? 'Medium' : 'Low');
-            const timestamp = alarm.ts ? new Date(alarm.ts * 1000).toLocaleString() : 'N/A';
-            const deviceName = alarm.device?.name || 'Unknown';
-            const deviceIp = alarm.device?.ip || alarm.device?.ipAddress || 'N/A';
-            const remoteDomain = alarm.remote?.domain || alarm.remote?.ip || 'N/A';
-            const remoteCountry = alarm.remote?.country || 'Unknown';
-            const download = formatBytes(alarm.transfer?.download);
-            const upload = formatBytes(alarm.transfer?.upload);
-            const total = formatBytes(alarm.transfer?.total);
-            const status = alarm.status || 'active';
-            
-            formattedOutput += `| **${severity}** | ${timestamp} | ${alarm.alarmType || `Type ${alarm.type}`} | ${deviceName}<br>\`${deviceIp}\` | ${remoteDomain}<br>${remoteCountry} | ↓${download}<br>↑${upload}<br>Total: ${total} | ${status} |\n`;
-          });
-        }
-        
-        formattedOutput += `\n---\n**Total Alarms**: ${alarms.length}\n`;
-        if (data.next_cursor) {
-          formattedOutput += `**More results available** - cursor: ${data.next_cursor}\n`;
-        }
-        
-        return { content: [{ type: "text", text: formatAsXML(data, "list_alarms", { 
-          count: alarms.length,
-          has_more: !!data.next_cursor,
-          next_cursor: data.next_cursor || null,
-          formatted_summary: formattedOutput 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "list_alarms", { 
+          query: args.query || null,
+          group_by: args.groupBy || null,
+          sort_by: args.sortBy || null,
+          limit: args.limit || null,
+          cursor: args.cursor || null
         }) }] };
       }
 
@@ -937,8 +1833,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         }
         
-        return { content: [{ type: "text", text: formatAsXML(data, "list_rules", { 
-          count: data.count || data.results?.length || 0,
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "list_rules", { 
           query: args.query || null 
         }) }] };
       }
@@ -1011,7 +1906,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.cursor) params.cursor = args.cursor;
         
         const response = await httpClient.get("/flows", { params });
-        return { content: [{ type: "text", text: formatAsXML(response.data, "list_flows", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(response.data, "list_flows", { 
           query: args.query || null,
           group_by: args.groupBy || null,
           sort_by: args.sortBy || null,
@@ -1027,14 +1922,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: formatAsXML(data, "list_target_lists", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "list_target_lists", { 
           count: data.count || data.results?.length || 0 
         }) }] };
       }
 
       case "get_target_list": {
         const response = await httpClient.get(`/target-lists/${args.id}`);
-        return { content: [{ type: "text", text: formatAsXML(response.data, "get_target_list", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(response.data, "get_target_list", { 
           target_list_id: args.id 
         }) }] };
       }
@@ -1049,7 +1944,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.notes) body.notes = args.notes;
         
         const response = await httpClient.post("/target-lists", body);
-        return { content: [{ type: "text", text: formatAsXML(response.data, "create_target_list", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(response.data, "list_target_lists", { 
           name: args.name,
           target_count: (args.targets as any[])?.length || 0,
           owner: args.owner || null,
@@ -1089,11 +1984,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: formatAsXML(data, "get_statistics", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "get_statistics", { 
           stats_type: args.type,
           group: args.group || null,
-          limit: args.limit || null,
-          count: data.count || data.results?.length || 0 
+          limit: args.limit || null
         }) }] };
       }
 
@@ -1102,7 +1996,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.group) params.group = args.group;
         
         const response = await httpClient.get("/stats/simple", { params });
-        return { content: [{ type: "text", text: formatAsXML(response.data, "get_simple_statistics", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(response.data, "get_simple_statistics", { 
           group: args.group || null 
         }) }] };
       }
@@ -1117,8 +2011,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: formatAsXML(data, "get_trends", { 
-          trend_type: args.type,
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "get_trends", { 
+          trends_type: args.type,
           group: args.group || null,
           count: data.count || data.results?.length || 0 
         }) }] };
@@ -1128,11 +2022,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "search_global": {
         const searchTypes: string[] = (args.types as string[]) || ["devices", "alarms", "flows", "boxes"];
         const limit = args.limit || 10;
-        const results: any = {
-          query: args.query,
-          results: {},
-          total_count: 0
-        };
+        const results: any = {};
+        let totalCount = 0;
 
         // Search across all specified entity types (only searchable ones)
         for (const entityType of searchTypes) {
@@ -1166,35 +2057,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             
             // Handle API response format properly
             if (data.results) {
-              results.results[entityType] = {
-                results: data.results,
-                count: data.count || data.results.length,
-                next_cursor: data.next_cursor
-              };
+              results[entityType] = data.results;
+              totalCount += data.results.length;
             } else if (Array.isArray(data)) {
-              results.results[entityType] = {
-                results: data,
-                count: data.length
-              };
+              results[entityType] = data;
+              totalCount += data.length;
             } else {
-              results.results[entityType] = {
-                results: [data],
-                count: 1
-              };
+              results[entityType] = [data];
+              totalCount += 1;
             }
-            
-            results.total_count += results.results[entityType].count;
           } catch (error) {
             // Continue with other entity types if one fails
-            results.results[entityType] = { error: `Failed to search ${entityType}` };
+            results[entityType] = [];
           }
         }
 
-        return { content: [{ type: "text", text: formatAsXML(results, "search_global", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(results, "search_global", { 
           query: args.query,
           search_types: searchTypes,
           limit: limit,
-          total_count: results.total_count 
+          total_count: totalCount 
         }) }] };
       }
 
@@ -1208,42 +2090,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const response = await httpClient.get("/devices", { params });
         const data = response.data;
         
-        // Format the response with rich information
-        let formattedOutput = `# Device Search Results for: "${args.query}"\n\n`;
-        formattedOutput += "**IMPORTANT**: When displaying these devices to the user, use this EXACT format:\n\n";
-        
-        const devices = data.results || [];
-        devices.forEach((device: any, index: number) => {
-          const deviceName = device.name || 'Unknown Device';
-          const deviceIp = device.ipAddress || device.ip || 'N/A';
-          const deviceMac = device.mac || 'N/A';
-          const deviceType = device.type || 'Unknown';
-          const deviceStatus = device.online ? 'Online' : 'Offline';
-          const boxName = device.box?.name || device.boxName || 'N/A';
-          const lastSeen = device.lastActiveTime ? new Date(device.lastActiveTime * 1000).toLocaleString() : 'N/A';
-          
-          formattedOutput += `\n📱 **${deviceName}**\n`;
-          formattedOutput += `**IP Address:** \`${deviceIp}\`\n`;
-          formattedOutput += `**MAC Address:** \`${deviceMac}\`\n`;
-          formattedOutput += `**Type:** ${deviceType}\n`;
-          formattedOutput += `**Status:** ${deviceStatus}\n`;
-          formattedOutput += `**Box:** ${boxName}\n`;
-          formattedOutput += `**Last Seen:** ${lastSeen}\n`;
-          formattedOutput += `${'─'.repeat(60)}\n`;
-        });
-        
-        formattedOutput += `\n---\n**Found**: ${devices.length} devices\n`;
-        if (data.next_cursor) {
-          formattedOutput += `**More results available** - cursor: ${data.next_cursor}\n`;
-        }
-        
-        return { content: [{ type: "text", text: formatAsXML(data, "search_devices", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "search_devices", { 
           query: args.query,
           limit: args.limit || 50,
-          count: devices.length,
-          has_more: !!data.next_cursor,
-          next_cursor: data.next_cursor || null,
-          formatted_summary: formattedOutput 
+          cursor: args.cursor || null
         }) }] };
       }
 
@@ -1256,14 +2106,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const response = await httpClient.get("/alarms", { params });
         const data = response.data;
-        const alarms = data.results || [];
         
-        return { content: [{ type: "text", text: formatAsXML(data, "search_alarms", { 
+        return { content: [{ type: "text", text: FirewallaResponseFormatter.formatEnhancedResponse(data, "search_alarms", { 
           query: args.query,
           limit: args.limit || 50,
-          count: alarms.length,
-          has_more: !!data.next_cursor,
-          next_cursor: data.next_cursor || null
+          cursor: args.cursor || null
         }) }] };
       }
 

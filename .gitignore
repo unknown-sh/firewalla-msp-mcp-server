@@ -60,7 +60,6 @@ htmlcov/
 .nox/
 .pytest_cache/
 .phpunit.result.cache
-tests/
 examples/
 
 # Package managers
