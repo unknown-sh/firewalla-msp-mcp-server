@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "firewalla-msp": {
+      "command": "node",
+      "args": ["/Users/james/Repos/firewalla-mcp-server/firewalla-msp-mcp-server/dist/index.js"],
+      "env": {
+        "FIREWALLA_MSP_API_KEY": "your-api-key-from-env-file",
+        "FIREWALLA_MSP_DOMAIN": "your-domain-from-env-file"
+      }
+    }
+  }
+}

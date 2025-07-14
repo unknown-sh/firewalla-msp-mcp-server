@@ -1,0 +1,32 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+For the full text of the GNU General Public License version 3,
+please visit: https://www.gnu.org/licenses/gpl-3.0.txt
+
+---
+
+ADDITIONAL INFORMATION:
+
+This software is an independent MCP (Model Context Protocol) server 
+implementation for Firewalla MSP API integration. It is not affiliated 
+with, endorsed by, or developed by Firewalla Inc. This is an open-source 
+community project created to provide MCP integration capabilities for 
+Firewalla MSP users.
+
+Firewalla® is a trademark of Firewalla Inc. The use of this trademark 
+in this project is purely for descriptive purposes to indicate 
+compatibility and does not imply any official relationship or endorsement.

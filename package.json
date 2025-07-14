@@ -1,0 +1,57 @@
+{
+  "name": "@unknown-sh/firewalla-msp-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Firewalla MSP API - provides CRUD operations for all Firewalla MSP endpoints",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "firewalla-msp-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "firewalla",
+    "msp",
+    "api",
+    "security"
+  ],
+  "author": "unknown-sh",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unknown-sh/firewalla-msp-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/unknown-sh/firewalla-msp-mcp-server/issues"
+  },
+  "homepage": "https://github.com/unknown-sh/firewalla-msp-mcp-server#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "msw": "^2.7.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
