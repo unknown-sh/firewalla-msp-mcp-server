@@ -68,26 +68,19 @@ Add to your Claude Desktop configuration file:
 }
 ```
 
-#### 2. Claude Code (Cline)
+#### 2. Claude Code
 
-Add to your VS Code settings.json or use the Cline MCP Settings UI:
+Add the MCP server using the Claude Code CLI:
 
-```json
-{
-  "cline.mcpServers": {
-    "firewalla-msp": {
-      "command": "npx",
-      "args": ["@unknown-sh/firewalla-msp-mcp-server"],
-      "env": {
-        "FIREWALLA_MSP_API_KEY": "your-api-key-here",
-        "FIREWALLA_MSP_DOMAIN": "your-domain.firewalla.net"
-      }
-    }
-  }
-}
+```bash
+claude mcp add firewalla-msp -e FIREWALLA_MSP_API_KEY=your-api-key-here -e FIREWALLA_MSP_DOMAIN=your-domain.firewalla.net -- npx @unknown-sh/firewalla-msp-mcp-server
 ```
 
-Or via Cline's UI: Click the MCP icon in the status bar → Add Server → Enter the configuration.
+Or if you have the server installed globally:
+
+```bash
+claude mcp add firewalla-msp -e FIREWALLA_MSP_API_KEY=your-api-key-here -e FIREWALLA_MSP_DOMAIN=your-domain.firewalla.net -- firewalla-msp-mcp-server
+```
 
 #### 3. Gemini-CLI
 
