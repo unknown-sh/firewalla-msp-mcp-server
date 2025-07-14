@@ -5,6 +5,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -47,14 +49,101 @@ const httpClient: AxiosInstance = axios.create({
 const server = new Server(
   {
     name: "firewalla-msp-mcp",
-    version: "1.0.0",
+    version: "1.1.0",
   },
   {
     capabilities: {
       tools: {},
+      resources: {},
+      prompts: {},
     },
   }
 );
+
+// Helper function to format bytes
+function formatBytes(bytes: number | undefined): string {
+  if (!bytes || bytes === 0) return '0B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + sizes[i];
+}
+
+// XML utility functions
+function escapeXML(str: string): string {
+  if (typeof str !== 'string') return String(str);
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function jsonToXML(obj: any, indent: number = 2): string {
+  const spaces = ' '.repeat(indent);
+  
+  if (obj === null || obj === undefined) {
+    return `${spaces}<value>null</value>`;
+  }
+  
+  if (typeof obj === 'string') {
+    return `${spaces}<value>${escapeXML(obj)}</value>`;
+  }
+  
+  if (typeof obj === 'number' || typeof obj === 'boolean') {
+    return `${spaces}<value>${obj}</value>`;
+  }
+  
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) {
+      return `${spaces}<array></array>`;
+    }
+    
+    const items = obj.map((item, index) => {
+      const itemXML = jsonToXML(item, indent + 2);
+      return `${spaces}  <item index="${index}">\n${itemXML}\n${spaces}  </item>`;
+    }).join('\n');
+    
+    return `${spaces}<array>\n${items}\n${spaces}</array>`;
+  }
+  
+  if (typeof obj === 'object') {
+    const entries = Object.entries(obj);
+    if (entries.length === 0) {
+      return `${spaces}<object></object>`;
+    }
+    
+    const properties = entries.map(([key, value]) => {
+      const valueXML = jsonToXML(value, indent + 2);
+      return `${spaces}  <${escapeXML(key)}>\n${valueXML}\n${spaces}  </${escapeXML(key)}>`;
+    }).join('\n');
+    
+    return `${spaces}<object>\n${properties}\n${spaces}</object>`;
+  }
+  
+  return `${spaces}<value>${escapeXML(String(obj))}</value>`;
+}
+
+function formatAsXML(data: any, responseType: string, metadata?: Record<string, any>): string {
+  const timestamp = new Date().toISOString();
+  const metadataXML = metadata ? Object.entries(metadata).map(([key, value]) => 
+    `    <${escapeXML(key)}>${escapeXML(String(value))}</${escapeXML(key)}>`
+  ).join('\n') : '';
+  
+  const dataXML = jsonToXML(data, 2);
+  
+  return `<firewalla_response>
+  <metadata>
+    <response_type>${escapeXML(responseType)}</response_type>
+    <timestamp>${timestamp}</timestamp>
+${metadataXML}
+  </metadata>
+  <data>
+${dataXML}
+  </data>
+</firewalla_response>`;
+}
 
 // Utility function for paginated requests (kept for future use)
 // async function fetchAllPaginated(endpoint: string, params: any = {}) {
@@ -99,7 +188,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // Devices API
       {
         name: "list_devices",
-        description: "Get all devices across boxes",
+        description: "Get all devices across boxes (returns device name, MAC, IP, type, status, and more)",
         inputSchema: {
           type: "object",
           properties: {
@@ -623,7 +712,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "search_devices",
-        description: "Search devices using Firewalla query syntax with device-specific qualifiers",
+        description: "Search devices using Firewalla query syntax with device-specific qualifiers (returns device name, MAC, IP, type, status, and more)",
         inputSchema: {
           type: "object",
           properties: {
@@ -711,7 +800,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(data, "list_boxes", { count: data.count || data.results?.length || 0 }) }] };
       }
 
       // Devices API
@@ -724,7 +813,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        
+        // Format the response with rich information
+        let formattedOutput = "# Firewalla Devices\n\n";
+        
+        const devices = data.results || data;
+        
+        if (devices.length === 0) {
+          formattedOutput += "No devices found.\n";
+        } else {
+          // Create a markdown table for better formatting
+          formattedOutput += "| 📱 Device Name | IP Address | MAC Address | Type | Status | Box | Last Seen |\n";
+          formattedOutput += "|----------------|------------|-------------|------|--------|-----|------------|\n";
+          
+          devices.forEach((device: any) => {
+            const deviceName = device.name || 'Unknown Device';
+            const deviceIp = device.ipAddress || device.ip || 'N/A';
+            const deviceMac = device.mac || 'N/A';
+            const deviceType = device.type || 'Unknown';
+            const deviceStatus = device.online ? '🟢 Online' : '🔴 Offline';
+            const boxName = device.box?.name || device.boxName || 'N/A';
+            const lastSeen = device.lastActiveTime ? new Date(device.lastActiveTime * 1000).toLocaleString() : 'N/A';
+            
+            formattedOutput += `| **${deviceName}** | \`${deviceIp}\` | \`${deviceMac}\` | ${deviceType} | ${deviceStatus} | ${boxName} | ${lastSeen} |\n`;
+          });
+        }
+        
+        formattedOutput += `\n---\n**Total Devices**: ${devices.length}\n`;
+        
+        return { content: [{ type: "text", text: formatAsXML(data, "list_devices", { 
+          count: devices.length,
+          formatted_summary: formattedOutput 
+        }) }] };
       }
 
       // Alarms API
@@ -737,12 +857,55 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.cursor) params.cursor = args.cursor;
         
         const response = await httpClient.get("/alarms", { params });
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        const data = response.data;
+        
+        // Format the response with rich information
+        let formattedOutput = "# Firewalla Alarms\n\n";
+        
+        const alarms = data.results || [];
+        
+        if (alarms.length === 0) {
+          formattedOutput += "No alarms found.\n";
+        } else {
+          // Create a markdown table for better formatting
+          formattedOutput += "| 🚨 Severity | Time | Type | Device | Remote | Transfer | Status |\n";
+          formattedOutput += "|-------------|------|------|---------|---------|----------|--------|\n";
+          
+          alarms.forEach((alarm: any) => {
+            const severity = alarm.severity || (alarm.type <= 2 ? 'High' : alarm.type <= 5 ? 'Medium' : 'Low');
+            const timestamp = alarm.ts ? new Date(alarm.ts * 1000).toLocaleString() : 'N/A';
+            const deviceName = alarm.device?.name || 'Unknown';
+            const deviceIp = alarm.device?.ip || alarm.device?.ipAddress || 'N/A';
+            const remoteDomain = alarm.remote?.domain || alarm.remote?.ip || 'N/A';
+            const remoteCountry = alarm.remote?.country || 'Unknown';
+            const download = formatBytes(alarm.transfer?.download);
+            const upload = formatBytes(alarm.transfer?.upload);
+            const total = formatBytes(alarm.transfer?.total);
+            const status = alarm.status || 'active';
+            
+            formattedOutput += `| **${severity}** | ${timestamp} | ${alarm.alarmType || `Type ${alarm.type}`} | ${deviceName}<br>\`${deviceIp}\` | ${remoteDomain}<br>${remoteCountry} | ↓${download}<br>↑${upload}<br>Total: ${total} | ${status} |\n`;
+          });
+        }
+        
+        formattedOutput += `\n---\n**Total Alarms**: ${alarms.length}\n`;
+        if (data.next_cursor) {
+          formattedOutput += `**More results available** - cursor: ${data.next_cursor}\n`;
+        }
+        
+        return { content: [{ type: "text", text: formatAsXML(data, "list_alarms", { 
+          count: alarms.length,
+          has_more: !!data.next_cursor,
+          next_cursor: data.next_cursor || null,
+          formatted_summary: formattedOutput 
+        }) }] };
       }
 
       case "get_alarm": {
         const response = await httpClient.get(`/alarms/${args.gid}/${args.aid}`);
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "get_alarm", { 
+          gid: args.gid, 
+          aid: args.aid 
+        }) }] };
       }
 
       case "delete_alarm": {
@@ -774,7 +937,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         }
         
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(data, "list_rules", { 
+          count: data.count || data.results?.length || 0,
+          query: args.query || null 
+        }) }] };
       }
 
       case "pause_rule": {
@@ -801,7 +967,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.schedule) body.schedule = args.schedule;
         
         const response = await httpClient.post("/rules", body);
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "create_rule", { 
+          action: args.action,
+          direction: args.direction,
+          protocol: args.protocol,
+          target_type: (args.target as any)?.type,
+          target_value: (args.target as any)?.value 
+        }) }] };
       }
 
       case "update_rule": {
@@ -817,7 +989,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.status) body.status = args.status;
         
         const response = await httpClient.put(`/rules/${args.id}`, body);
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "update_rule", { 
+          rule_id: args.id,
+          updated_fields: Object.keys(body),
+          field_count: Object.keys(body).length 
+        }) }] };
       }
 
       case "delete_rule": {
@@ -835,7 +1011,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.cursor) params.cursor = args.cursor;
         
         const response = await httpClient.get("/flows", { params });
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "list_flows", { 
+          query: args.query || null,
+          group_by: args.groupBy || null,
+          sort_by: args.sortBy || null,
+          limit: args.limit || null,
+          cursor: args.cursor || null 
+        }) }] };
       }
 
       // Target Lists API
@@ -845,12 +1027,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(data, "list_target_lists", { 
+          count: data.count || data.results?.length || 0 
+        }) }] };
       }
 
       case "get_target_list": {
         const response = await httpClient.get(`/target-lists/${args.id}`);
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "get_target_list", { 
+          target_list_id: args.id 
+        }) }] };
       }
 
       case "create_target_list": {
@@ -863,7 +1049,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.notes) body.notes = args.notes;
         
         const response = await httpClient.post("/target-lists", body);
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "create_target_list", { 
+          name: args.name,
+          target_count: (args.targets as any[])?.length || 0,
+          owner: args.owner || null,
+          category: args.category || null 
+        }) }] };
       }
 
       case "update_target_list": {
@@ -875,7 +1066,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.notes) body.notes = args.notes;
         
         const response = await httpClient.patch(`/target-lists/${args.id}`, body);
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "update_target_list", { 
+          target_list_id: args.id,
+          updated_fields: Object.keys(body),
+          field_count: Object.keys(body).length 
+        }) }] };
       }
 
       case "delete_target_list": {
@@ -894,7 +1089,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(data, "get_statistics", { 
+          stats_type: args.type,
+          group: args.group || null,
+          limit: args.limit || null,
+          count: data.count || data.results?.length || 0 
+        }) }] };
       }
 
       case "get_simple_statistics": {
@@ -902,7 +1102,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.group) params.group = args.group;
         
         const response = await httpClient.get("/stats/simple", { params });
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(response.data, "get_simple_statistics", { 
+          group: args.group || null 
+        }) }] };
       }
 
       // Trends API
@@ -915,7 +1117,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = Array.isArray(response.data) 
           ? { count: response.data.length, results: response.data }
           : response.data;
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(data, "get_trends", { 
+          trend_type: args.type,
+          group: args.group || null,
+          count: data.count || data.results?.length || 0 
+        }) }] };
       }
 
       // Search API
@@ -984,7 +1190,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
-        return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+        return { content: [{ type: "text", text: formatAsXML(results, "search_global", { 
+          query: args.query,
+          search_types: searchTypes,
+          limit: limit,
+          total_count: results.total_count 
+        }) }] };
       }
 
       case "search_devices": {
@@ -995,7 +1206,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.cursor) params.cursor = args.cursor;
 
         const response = await httpClient.get("/devices", { params });
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        const data = response.data;
+        
+        // Format the response with rich information
+        let formattedOutput = `# Device Search Results for: "${args.query}"\n\n`;
+        formattedOutput += "**IMPORTANT**: When displaying these devices to the user, use this EXACT format:\n\n";
+        
+        const devices = data.results || [];
+        devices.forEach((device: any, index: number) => {
+          const deviceName = device.name || 'Unknown Device';
+          const deviceIp = device.ipAddress || device.ip || 'N/A';
+          const deviceMac = device.mac || 'N/A';
+          const deviceType = device.type || 'Unknown';
+          const deviceStatus = device.online ? 'Online' : 'Offline';
+          const boxName = device.box?.name || device.boxName || 'N/A';
+          const lastSeen = device.lastActiveTime ? new Date(device.lastActiveTime * 1000).toLocaleString() : 'N/A';
+          
+          formattedOutput += `\n📱 **${deviceName}**\n`;
+          formattedOutput += `**IP Address:** \`${deviceIp}\`\n`;
+          formattedOutput += `**MAC Address:** \`${deviceMac}\`\n`;
+          formattedOutput += `**Type:** ${deviceType}\n`;
+          formattedOutput += `**Status:** ${deviceStatus}\n`;
+          formattedOutput += `**Box:** ${boxName}\n`;
+          formattedOutput += `**Last Seen:** ${lastSeen}\n`;
+          formattedOutput += `${'─'.repeat(60)}\n`;
+        });
+        
+        formattedOutput += `\n---\n**Found**: ${devices.length} devices\n`;
+        if (data.next_cursor) {
+          formattedOutput += `**More results available** - cursor: ${data.next_cursor}\n`;
+        }
+        
+        return { content: [{ type: "text", text: formatAsXML(data, "search_devices", { 
+          query: args.query,
+          limit: args.limit || 50,
+          count: devices.length,
+          has_more: !!data.next_cursor,
+          next_cursor: data.next_cursor || null,
+          formatted_summary: formattedOutput 
+        }) }] };
       }
 
       case "search_alarms": {
@@ -1006,7 +1255,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.cursor) params.cursor = args.cursor;
 
         const response = await httpClient.get("/alarms", { params });
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        const data = response.data;
+        const alarms = data.results || [];
+        
+        return { content: [{ type: "text", text: formatAsXML(data, "search_alarms", { 
+          query: args.query,
+          limit: args.limit || 50,
+          count: alarms.length,
+          has_more: !!data.next_cursor,
+          next_cursor: data.next_cursor || null
+        }) }] };
       }
 
       case "search_flows": {
@@ -1017,7 +1275,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.cursor) params.cursor = args.cursor;
 
         const response = await httpClient.get("/flows", { params });
-        return { content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }] };
+        const data = response.data;
+        const flows = data.results || [];
+        
+        return { content: [{ type: "text", text: formatAsXML(data, "search_flows", { 
+          query: args.query,
+          limit: args.limit || 50,
+          count: flows.length,
+          has_more: !!data.next_cursor,
+          next_cursor: data.next_cursor || null
+        }) }] };
       }
 
       default:
@@ -1047,6 +1314,256 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     
     throw error;
   }
+});
+
+// Define prompts for formatting guidance
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  return {
+    prompts: [
+      {
+        name: "format_devices",
+        description: "Formatting guide for presenting device information",
+      },
+      {
+        name: "format_alarms",
+        description: "Formatting guide for presenting alarm information",
+      },
+      {
+        name: "format_flows",
+        description: "Formatting guide for presenting network flow information",
+      },
+      {
+        name: "format_rules",
+        description: "Formatting guide for presenting security rules",
+      },
+      {
+        name: "format_boxes",
+        description: "Formatting guide for presenting Firewalla box information",
+      },
+      {
+        name: "format_statistics",
+        description: "Formatting guide for presenting statistics and trends",
+      },
+      {
+        name: "format_target_lists",
+        description: "Formatting guide for presenting target lists",
+      },
+      {
+        name: "format_search_results",
+        description: "Formatting guide for presenting search results across multiple types",
+      },
+    ],
+  };
+});
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name } = request.params;
+  
+  const formatGuides: Record<string, { description: string; prompt: string }> = {
+    format_devices: {
+      description: "How to format device information",
+      prompt: `When displaying Firewalla device information, use this format:
+
+📱 **Device Name** | IP: \`{ipAddress}\` | MAC: \`{mac}\`
+   ├─ Type: {type}
+   ├─ Status: {online/offline}
+   ├─ Box: {box.name}
+   └─ Last Seen: {lastActiveTime}
+
+Include these key fields:
+- Device name (bold)
+- IP address (in code blocks)
+- MAC address (in code blocks)
+- Device type
+- Online/offline status
+- Associated box name
+- Last active time
+
+For lists, separate each device with a blank line.
+Group by network/box if more than 10 devices.`,
+    },
+    
+    format_alarms: {
+      description: "How to format alarm information",
+      prompt: `When displaying Firewalla alarm information, use this format:
+
+🚨 **{severity} Alert** | {timestamp}
+   ├─ Type: {alarmType}
+   ├─ Device: {device.name} (\`{device.ip}\`)
+   ├─ Remote: {remote.domain || remote.ip} ({remote.country})
+   ├─ Transfer: ↓{download} ↑{upload} Total: {total}
+   └─ Status: {status}
+
+Include these key fields:
+- Severity level (with appropriate emoji)
+- Timestamp (human-readable)
+- Alarm type description
+- Device name and IP
+- Remote destination (domain/IP and country)
+- Data transfer amounts (formatted with units)
+- Current status
+
+Group alarms by severity or time period if many results.`,
+    },
+    
+    format_flows: {
+      description: "How to format network flow information",
+      prompt: `When displaying Firewalla network flow information, use this format:
+
+🌐 **{device.name}** → {remote.domain || remote.ip}
+   ├─ Direction: {inbound/outbound}
+   ├─ Protocol: {protocol} | Ports: {sport}→{dport}
+   ├─ Transfer: ↓{download} ↑{upload} Total: {total}
+   ├─ Category: {category}
+   └─ Time: {timestamp} | Duration: {duration}
+
+Include these key fields:
+- Source device name
+- Destination (domain preferred over IP)
+- Direction and protocol
+- Port information
+- Data transfer (with proper units)
+- Category classification
+- Timestamp and duration
+
+Sort by transfer amount or recency by default.`,
+    },
+    
+    format_rules: {
+      description: "How to format security rules",
+      prompt: `When displaying Firewalla security rules, use this format:
+
+🛡️ **{rule.name}** | Status: {active/paused}
+   ├─ Action: {allow/block} {direction} {protocol}
+   ├─ Target: {target.type}: {target.value}
+   ├─ Scope: {scope.type}: {scope.value} Port: {port}
+   └─ Schedule: {schedule info if applicable}
+
+Include these key fields:
+- Rule name (bold)
+- Current status
+- Action, direction, and protocol
+- Target specification
+- Scope details
+- Schedule (if time-limited)
+
+Group by action type (allow/block) if many rules.`,
+    },
+    
+    format_boxes: {
+      description: "How to format Firewalla box information",
+      prompt: `When displaying Firewalla box information, use this format:
+
+📦 **{box.name}** | Model: {model}
+   ├─ Status: {online/offline} | Version: {version}
+   ├─ Group: {group.name}
+   ├─ Devices: {deviceCount} active
+   ├─ Network: {network.name} ({network.subnet})
+   └─ Last Sync: {lastSync}
+
+Include these key fields:
+- Box name (bold)
+- Model type
+- Online status and firmware version
+- Group membership
+- Active device count
+- Network configuration
+- Last sync time
+
+List boxes in a table format if more than 5.`,
+    },
+    
+    format_statistics: {
+      description: "How to format statistics information",
+      prompt: `When displaying Firewalla statistics, use this format:
+
+📊 **Statistics Report** | Period: {timeRange}
+════════════════════════════════════════
+
+Top Boxes by Security Alarms:
+1. 📦 {box.name} - {alarmCount} alarms
+   └─ Most common: {topAlarmType}
+
+Top Boxes by Blocked Flows:
+1. 🚫 {box.name} - {blockedCount} blocked
+   └─ Top blocked: {topBlockedDomain}
+
+Top Regions by Blocked Flows:
+1. 🌍 {region} - {blockedCount} blocks
+   └─ Top category: {topCategory}
+
+Summary:
+- Total Boxes: {boxCount}
+- Active Alarms: {activeAlarmCount}
+- Total Rules: {ruleCount}
+- Blocked Today: {blockedToday}`,
+    },
+    
+    format_target_lists: {
+      description: "How to format target lists",
+      prompt: `When displaying Firewalla target lists, use this format:
+
+📋 **{list.name}** | Owner: {owner}
+   ├─ Category: {category}
+   ├─ Entries: {targetCount} items
+   ├─ Notes: {notes}
+   └─ Targets:
+      • {target1}
+      • {target2}
+      • {target3}
+      {... show first 5, then "and X more"}
+
+For multiple lists, show in a summary table:
+┌─────────────────┬──────────┬─────────┬────────┐
+│ List Name       │ Category │ Entries │ Owner  │
+├─────────────────┼──────────┼─────────┼────────┤
+│ {name}          │ {cat}    │ {count} │ {owner}│
+└─────────────────┴──────────┴─────────┴────────┘`,
+    },
+    
+    format_search_results: {
+      description: "How to format global search results",
+      prompt: `When displaying search results across multiple types, use this format:
+
+🔍 **Search Results for: "{query}"**
+════════════════════════════════════════
+
+📱 Devices ({deviceCount} found):
+{format first 3 devices using device format}
+{... and X more}
+
+🚨 Alarms ({alarmCount} found):
+{format first 3 alarms using alarm format}
+{... and X more}
+
+🌐 Flows ({flowCount} found):
+{format first 3 flows using flow format}
+{... and X more}
+
+📦 Boxes ({boxCount} found):
+{format matching boxes}
+
+Summary: {totalCount} total results across {typeCount} categories`,
+    },
+  };
+  
+  const guide = formatGuides[name];
+  if (!guide) {
+    throw new McpError(ErrorCode.InvalidRequest, `Unknown prompt: ${name}`);
+  }
+  
+  return {
+    description: guide.description,
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: guide.prompt,
+        },
+      },
+    ],
+  };
 });
 
 // Start the server
